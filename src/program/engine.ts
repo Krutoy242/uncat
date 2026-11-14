@@ -8,8 +8,23 @@ import { MagicString } from 'magic-string'
 import * as mr from 'multi-integer-range'
 import { Ahead, Ambient, Schedule } from '../kernel/index.ts'
 import { Compiled, compile, scan } from './grammar.ts'
-import { Attestation, Diagnostic, Fault, Meta, Occurrence, Replacement, Signal, Source, Span } from './model.ts'
+import {
+  Attestation,
+  Branch,
+  Diagnostic,
+  Expanded,
+  Expansion,
+  Fault,
+  Meta,
+  Occurrence,
+  Replacement,
+  Signal,
+  Source,
+  Span,
+} from './model.ts'
 import { Program, verdict, whole } from './program.ts'
+
+export { Branch, Expanded, Expansion }
 
 export class Lines {
   readonly text: string
@@ -65,27 +80,6 @@ export class Lines {
       .join('\n…\n')
   }
 }
-
-export class Branch extends Data.Class<{
-  readonly id: string
-  readonly source: Source
-  readonly children: Expansion | undefined
-}> {}
-
-export class Expanded extends Data.Class<{
-  readonly node: Ahead.Annotated<Meta, unknown>
-  readonly literal: Replacement | undefined
-  readonly branches: ReadonlyArray<Branch>
-  readonly fault: Fault | undefined
-  readonly enveloped: boolean
-  readonly depth: number
-}> {}
-
-export class Expansion extends Data.Class<{
-  readonly text: string
-  readonly window: mr.MIR
-  readonly nodes: ReadonlyArray<Expanded>
-}> {}
 
 const grammars = new WeakMap<Program, ReadonlyArray<Compiled>>()
 
@@ -335,7 +329,7 @@ const replace = (code: MagicString, start: number, end: number, text: string): v
   else code.update(start, end, text)
 }
 
-const collapse = (code: MagicString, lines: Lines, expanded: Expanded, replacement: Replacement): void => {
+export const collapse = (code: MagicString, lines: Lines, expanded: Expanded, replacement: Replacement): void => {
   const { span, placement } = expanded.node.meta
   const text = lines.text
   if (!replacement.collapse) return replace(code, span.start, span.end, replacement.text)
@@ -372,6 +366,18 @@ class Block extends Data.Class<{ readonly text: string; readonly reference: bool
 
 class Rendered extends Data.Class<{ readonly text: string; readonly detached: ReadonlyArray<string> }> {}
 
+export const merge = (group: ReadonlyArray<Branch>, text: string, window: mr.MIR): Expansion | undefined => {
+  const seen = new Map<number, Expanded>()
+  for (const branch of group) {
+    for (const expanded of branch.children?.nodes ?? []) {
+      if (!seen.has(expanded.node.meta.span.start)) seen.set(expanded.node.meta.span.start, expanded)
+    }
+  }
+  if (group.every((branch) => branch.children === undefined)) return undefined
+  const nodes = [...seen.values()].toSorted((a, b) => a.node.meta.span.start - b.node.meta.span.start)
+  return new Expansion({ text, window, nodes })
+}
+
 export const render = (
   program: Program,
   root: Expansion,
@@ -386,18 +392,6 @@ export const render = (
   })
   const plan = program.plan(occurrences, attested)
   const claimed = new Set<string>()
-
-  const merge = (group: ReadonlyArray<Branch>, text: string, window: mr.MIR): Expansion | undefined => {
-    const seen = new Map<number, Expanded>()
-    for (const branch of group) {
-      for (const expanded of branch.children?.nodes ?? []) {
-        if (!seen.has(expanded.node.meta.span.start)) seen.set(expanded.node.meta.span.start, expanded)
-      }
-    }
-    if (group.every((branch) => branch.children === undefined)) return undefined
-    const nodes = [...seen.values()].toSorted((a, b) => a.node.meta.span.start - b.node.meta.span.start)
-    return new Expansion({ text, window, nodes })
-  }
 
   const body = (
     source: Source,
@@ -439,10 +433,7 @@ export const render = (
   const interpolate = Effect.fnUntraced(function* (branch: Branch, mode: 'inline' | 'detached') {
     const inner = yield* body(branch.source, branch.children, mode)
     const payload = yield* program.payload(branch.source, inner.text)
-    const text =
-      payload.body === '' && payload.attrs.length > 0
-        ? program.envelope(branch.source, payload)
-        : payload.body.replace(/\n$/, '')
+    const text = payload.body.replace(/\n$/, '')
     return new Rendered({ text, detached: inner.detached })
   })
 
@@ -485,5 +476,9 @@ export const render = (
     })
   }
 
-  return Effect.map(expansionOf(root, 'inline'), (rendered) => rendered.text)
+  return Effect.flatMap(program.tree(root, attested), (custom) =>
+    custom === undefined
+      ? Effect.map(expansionOf(root, 'inline'), (rendered) => rendered.text)
+      : Effect.succeed(custom),
+  )
 }

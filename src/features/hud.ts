@@ -2,6 +2,7 @@
  * Human presenter that draws a live heads-up display sized to the terminal,
  * rendering progress and volume while work runs and markdown when finished.
  */
+import { styleText } from 'node:util'
 import { intro, log, outro } from '@clack/prompts'
 import { Context, Effect, Layer } from 'effect'
 import { HookableCore } from 'hookable'
@@ -19,6 +20,11 @@ const SPINNER = ['◐', '◓', '◑', '◒']
 
 const GLYPH = { running: '◌', done: '◆', fault: '✖' } as const
 
+const hasColor = (): boolean => !('NO_COLOR' in process.env) && process.env['NODE_DISABLE_COLORS'] !== '1'
+
+const paint = (format: Parameters<typeof styleText>[0], text: string): string =>
+  hasColor() ? styleText(format, text, { validateStream: false }) : text
+
 const meter = (ratio: number, width: number): string => {
   const units = Math.round(Math.max(0, Math.min(1, ratio)) * width * 8)
   const full = Math.floor(units / 8)
@@ -27,9 +33,11 @@ const meter = (ratio: number, width: number): string => {
 
 const volume = (bytes: number): number => Math.min(1, Math.log10(bytes + 1) / 6)
 
-const segments = (ratio: number, width: number): string => {
+const segments = (ratio: number, width: number, styled = true): string => {
   const filled = Math.round(Math.max(0, Math.min(1, ratio)) * width)
-  return `${'▰'.repeat(filled)}${'▱'.repeat(width - filled)}`
+  const full = '▰'.repeat(filled)
+  const empty = '▱'.repeat(width - filled)
+  return styled ? `${paint('green', full)}${paint('dim', empty)}` : `${full}${empty}`
 }
 
 const fit = (text: string, width: number): string =>
@@ -97,20 +105,37 @@ class Board {
     const bytes = rows.reduce((total, [row]) => total + row.bytes, 0)
     const spin = this.finished === 0 ? (SPINNER[this.ticks++ % SPINNER.length] ?? '') : '◆'
     const progress = rows.length === 0 ? 1 : settled / rows.length
-    const labelWidth = Math.max(12, Math.min(48, columns - 30))
+    const width = Math.max(40, Math.min(56, columns - 6))
+    const segWidth = 10
+    const ruleLen = Math.max(4, width - 8 - segWidth)
+    const topBar = `${paint('cyan', spin)} ${paint('bold', 'uncat')} ${paint('dim', '━'.repeat(ruleLen))} ${segments(progress, segWidth)}`
+    const labelWidth = Math.max(12, width - 18)
     const body = rows.slice(-Math.max(3, height - 4)).map(([row, branch]) => {
+      const glyph =
+        row.state === 'done'
+          ? paint('green', GLYPH.done)
+          : row.state === 'fault'
+            ? paint('red', GLYPH.fault)
+            : paint('yellow', GLYPH.running)
+      const connector = branch === '' ? '' : paint('dim', branch)
+      const maxLabelLen = Math.max(6, labelWidth - branch.length - 2)
+      const labelText = fit(row.label, maxLabelLen).padEnd(maxLabelLen, ' ')
+      const styledLabel = row.state === 'running' ? paint('bold', labelText) : labelText
       const tail =
         row.state === 'fault'
-          ? fit(row.detail, Math.max(10, columns - labelWidth - 10))
-          : `▕${meter(volume(row.bytes), 10)}▏`
-      return `│ ${fit(`${branch}${GLYPH[row.state]} ${row.label}`, labelWidth)} ${tail}`
+          ? paint('red', fit(row.detail, 12))
+          : `▕${paint('cyan', meter(volume(row.bytes), 8))}▏`
+      return `  ${connector}${glyph} ${styledLabel} ${tail}`
     })
-    return [
-      `${spin} uncat ${'━'.repeat(Math.max(4, columns - 36))} ${segments(progress, 12)}`,
-      ...body,
-      `│ ◷ ${'·'.repeat(Math.min(12, Math.ceil(elapsed / 250)))}`.padEnd(18, ' ') +
-        `vol ▕${meter(volume(bytes), 10)}▏ ✂ ${'▌'.repeat(this.shards.length)}  ${'✖'.repeat(Math.min(faults, 12))}`,
-    ].map((line) => line.slice(0, columns))
+    const dots = '·'.repeat(Math.min(8, Math.ceil(elapsed / 250))).padEnd(8, ' ')
+    const footerParts = [
+      `  ${paint('yellow', `◷ ${dots}`)}`,
+      `vol ▕${paint('cyan', meter(volume(bytes), 8))}▏`,
+      this.shards.length > 0 ? `✂ ${paint('magenta', '▌'.repeat(Math.min(this.shards.length, 6)))}` : '',
+      faults > 0 ? paint('red', '✖'.repeat(Math.min(faults, 6))) : '',
+    ].filter((part) => part !== '')
+    const footer = footerParts.join(' ')
+    return [topBar, ...body, footer]
   }
 }
 
@@ -119,7 +144,8 @@ const makeHudPort = () => {
   const bus = new HookableCore<{ signal: (signal: Signal) => void }>()
   const stream = process.stderr
   let drawn = 0
-  let last = 0
+  let last = -Infinity
+  let timer: NodeJS.Timeout | undefined
   const erase = (): void => {
     if (drawn > 0) stream.write(`\u001b[${drawn}F\u001b[J`)
     drawn = 0
@@ -133,6 +159,12 @@ const makeHudPort = () => {
     stream.write(`${lines.join('\n')}\n`)
     drawn = lines.length
   }
+  const stopTimer = (): void => {
+    if (timer !== undefined) {
+      clearInterval(timer)
+      timer = undefined
+    }
+  }
   bus.hook('signal', (signal) => {
     if (signal.kind === 'begin') {
       board.rows.clear()
@@ -140,13 +172,27 @@ const makeHudPort = () => {
       board.notes.length = 0
       board.finished = 0
       board.ticks = 0
+      stopTimer()
+      if (stream.isTTY) {
+        timer = setInterval(() => {
+          draw(true)
+        }, 80)
+        timer.unref()
+      }
+      draw(true)
     }
     board.apply(signal)
-    draw(signal.kind === 'end')
+    if (signal.kind === 'end') {
+      stopTimer()
+      draw(true)
+    } else {
+      draw(false)
+    }
   })
   return {
     push: (signal: Signal): void => void bus.callHook('signal', signal),
     settle: (): ReadonlyArray<string> => {
+      stopTimer()
       erase()
       return board.lines(stream.columns || 80, Number.MAX_SAFE_INTEGER)
     },
@@ -182,7 +228,7 @@ const summary = (outcome: Outcome): string => {
   const headline = `**${report.sources}** sources · **${size(report.bytes)}** · **${report.lines}** lines · **${(report.elapsedMs / 1000).toFixed(2)} s**`
   const outputs = report.outputs.map(
     (output) =>
-      `| \`${output.path}\` | ${segments(output.chars / Math.max(1, report.chars), 8)} ${size(output.bytes)} | ${output.lines} |`,
+      `| \`${output.path}\` | ${segments(output.chars / Math.max(1, report.chars), 8, false)} ${size(output.bytes)} | ${output.lines} |`,
   )
   const table = outputs.length === 0 ? [] : ['', '| output | volume | lines |', '| --- | --- | --- |', ...outputs]
   const chunks =
@@ -217,14 +263,16 @@ export const feature: Feature = defineFeature({
             if (outcome.toStdout) process.stdout.write(outcome.text.endsWith('\n') ? outcome.text : `${outcome.text}\n`)
             const output = outcome.toStdout ? process.stderr : process.stdout
             const rendered = yield* markdown.render(summary(outcome))
-            intro('uncat', { output })
-            log.message(tree.join('\n'), { output, symbol: '◇' })
+            intro(paint(['bgCyan', 'black', 'bold'], ' uncat '), { output })
+            log.message(tree.join('\n'), { output, symbol: paint('cyan', '◇') })
             log.message(rendered.trimEnd(), { output })
             for (const diagnostic of outcome.report.diagnostics) {
               log.error(`${diagnostic.message}${diagnostic.hint === '' ? '' : `\n${diagnostic.hint}`}`, { output })
             }
             outro(
-              outcome.report.diagnostics.length === 0 ? '◆ done' : `✖ ${outcome.report.diagnostics.length} unresolved`,
+              outcome.report.diagnostics.length === 0
+                ? paint('green', '◆ done')
+                : paint('red', `✖ ${outcome.report.diagnostics.length} unresolved`),
               { output },
             )
           }).pipe(Effect.provide(HudPort.layer), Effect.provide(MarkdownPort.layer)),

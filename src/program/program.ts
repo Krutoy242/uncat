@@ -10,6 +10,7 @@ import {
   Attestation,
   Body,
   Chunk,
+  Expansion,
   Fault,
   Fragment,
   Meta,
@@ -45,6 +46,7 @@ export class Program {
     occurrences: ReadonlyArray<Occurrence>,
     attested: ReadonlyArray<Attestation>,
   ) => ReadonlyMap<string, mr.MIR>
+  declare tree: (root: Expansion, attested: ReadonlyArray<Attestation>) => Effect.Effect<string | undefined>
   declare payload: (source: Source, body: string) => Effect.Effect<Payload>
   declare envelope: (source: Source, payload: Payload) => string
   declare reference: (source: Source) => string
@@ -83,6 +85,7 @@ export const base = (): Program =>
     enveloping: [],
     recursion: [],
     plan: () => new Map(),
+    tree: () => Effect.succeed(undefined),
     payload: (_, body) => Effect.succeed(new Payload({ attrs: [], body, hidden: 0 })),
     envelope: (_, payload) => payload.body,
     reference: (source) => source.label,

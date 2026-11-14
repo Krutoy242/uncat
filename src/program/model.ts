@@ -5,7 +5,7 @@
  */
 import { Data, Effect, Schema } from 'effect'
 import * as mr from 'multi-integer-range'
-import { Ambient } from '../kernel/index.ts'
+import { Ahead, Ambient } from '../kernel/index.ts'
 
 export class Span extends Data.Class<{ readonly start: number; readonly end: number }> {}
 
@@ -73,6 +73,27 @@ export class Payload extends Data.Class<{
 }> {}
 
 export class Replacement extends Data.Class<{ readonly text: string; readonly collapse: boolean }> {}
+
+export class Branch extends Data.Class<{
+  readonly id: string
+  readonly source: Source
+  readonly children: Expansion | undefined
+}> {}
+
+export class Expanded extends Data.Class<{
+  readonly node: Ahead.Annotated<Meta, unknown>
+  readonly literal: Replacement | undefined
+  readonly branches: ReadonlyArray<Branch>
+  readonly fault: Fault | undefined
+  readonly enveloped: boolean
+  readonly depth: number
+}> {}
+
+export class Expansion extends Data.Class<{
+  readonly text: string
+  readonly window: mr.MIR
+  readonly nodes: ReadonlyArray<Expanded>
+}> {}
 
 export class Attestation extends Data.Class<{ readonly identity: string; readonly extent: mr.MIR }> {}
 
