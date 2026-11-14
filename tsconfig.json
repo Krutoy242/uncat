@@ -1,0 +1,30 @@
+/*
+ * Compiler contract that keeps every module erasable, separately declarable
+ * and strictly typed so that native type stripping, isolated declaration emit
+ * and the type-aware linter all see the same program.
+ */
+{
+  "compilerOptions": {
+    "target": "es2025",
+    "lib": ["es2025", "esnext.disposable"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedDeclarations": true,
+    "declaration": true,
+    "noEmit": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "paths": { "virtual:ahead-features": ["./src/program/discovered.ts"] }
+  },
+  "include": ["src", "tests", "build", "scripts", "*.ts"]
+}

@@ -1,0 +1,329 @@
+/*
+ * Universal law runner that derives every case from the discovered features'
+ * own codecs and grammar tables, checking round trips, recognition of printed
+ * tokens, literal readings, quota conservation and idempotent expansion
+ * without naming a single feature or writing a single concrete token.
+ */
+import { assert, describe, expect, it } from '@effect/vitest'
+import { Arbitrary, Effect, Exit, Schema } from 'effect'
+import { discoveredFeatures } from 'virtual:ahead-features'
+import { recognize } from '../src/program/engine.ts'
+import { applicable, decode, print } from '../src/program/grammar.ts'
+import { Source } from '../src/program/model.ts'
+import { verdict, whole } from '../src/program/program.ts'
+import { settingsOf } from '../src/program/run.ts'
+import { program } from '../src/program/synthesis.ts'
+import { expandText, plant, scratch, within } from './harness.ts'
+
+const Word = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{1,12}$/))
+
+const prose = Arbitrary.schema(Schema.Struct({ left: Word, right: Word }))
+
+const json = (value: unknown): string => JSON.stringify(value)
+
+const sorted = (record: Readonly<Record<string, string>>): string =>
+  json(Object.entries(record).toSorted(([a], [b]) => a.localeCompare(b)))
+
+const matching = (pattern: string): Arbitrary.Arbitrary<string> =>
+  Arbitrary.schema(Schema.String.check(Schema.isPattern(new RegExp(`^(?:${pattern})$`, 'u'))))
+
+const flagsOn: Readonly<Record<string, unknown>> = Object.fromEntries(
+  settingsOf(program)
+    .filter((setting) => setting.kind === 'flag')
+    .map((setting) => [setting.key, true]),
+)
+
+const cwd = process.cwd()
+
+const tokens = (body: (typeof program.bodies)[number], positions: ReadonlyArray<'lead' | 'prefix' | 'suffix'>) => {
+  const fragments = program.fragments.filter(
+    (fragment) => applicable(fragment, body) && positions.includes(fragment.position),
+  )
+  const marks = Arbitrary.all(
+    fragments.map((fragment) =>
+      Arbitrary.all([
+        Arbitrary.schema(Schema.Boolean),
+        Arbitrary.filter(matching(fragment.pattern(body.sigil)), (text) =>
+          Exit.isSuccess(decode(fragment.codec, text)),
+        ),
+      ]),
+    ),
+  )
+  const encode = Schema.encodeSync(body.codec)
+  return Arbitrary.map(Arbitrary.all([Arbitrary.schema(body.codec), marks]), ([ast, picks]) => {
+    const chosen = Object.fromEntries(
+      fragments.flatMap((fragment, index) => {
+        const [on, text] = picks[index] ?? [false, '']
+        return on ? [[fragment.feature, text] as const] : []
+      }),
+    )
+    return { ast, marks: chosen, token: print(body, encode(ast), program.fragments, chosen) }
+  })
+}
+
+describe('codec isomorphism', () => {
+  for (const feature of discoveredFeatures) {
+    const codec = feature.syntaxCodec
+    if (codec === undefined) continue
+    it.effect(`${feature.name} decodes every encoding back to itself`, () =>
+      Effect.gen(function* () {
+        const encode = Schema.encodeSync(codec)
+        const decodeAll = Schema.decodeUnknownSync(codec)
+        const result = yield* Arbitrary.checkEffect(
+          Arbitrary.schema(codec),
+          (ast) => Effect.sync(() => json(decodeAll(encode(ast))) === json(ast)),
+          { runs: 200, seed: 42 },
+        )
+        expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
+      }),
+    )
+  }
+})
+
+describe('grammar product recognition', () => {
+  for (const body of program.bodies) {
+    it.effect(`${body.feature} tokens with any applicable marks are recognized as themselves`, () =>
+      Effect.gen(function* () {
+        const result = yield* Arbitrary.checkEffect(
+          Arbitrary.all([prose, tokens(body, ['lead', 'prefix', 'suffix'])]),
+          ([{ left, right }, { ast, marks, token }]) =>
+            Effect.map(recognize(program, `${left} ${token} ${right}`, whole), (nodes) => {
+              const [node] = nodes
+              return (
+                nodes.length === 1 &&
+                node !== undefined &&
+                node.meta.feature === body.feature &&
+                node.meta.span.start === left.length + 1 &&
+                node.meta.span.end === left.length + 1 + token.length &&
+                json(node.payload) === json(ast) &&
+                sorted(node.meta.marks) === sorted(marks)
+              )
+            }).pipe(within(cwd)),
+          { runs: 150, seed: 7 },
+        )
+        expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
+      }),
+    )
+  }
+
+  for (const scanner of program.scanners) {
+    const codec = discoveredFeatures.find((feature) => feature.name === scanner.feature)?.syntaxCodec
+    if (codec === undefined) continue
+    it.effect(`${scanner.feature} finds every encoding embedded in prose`, () =>
+      Effect.gen(function* () {
+        const encode = Schema.encodeSync(codec)
+        const result = yield* Arbitrary.checkEffect(
+          Arbitrary.all([prose, Arbitrary.schema(codec)]),
+          ([{ left, right }, ast]) => {
+            const token = encode(ast)
+            return Effect.map(
+              recognize(program, `${left} ${token} ${right}`, whole),
+              (nodes) =>
+                nodes.length === 1 &&
+                nodes[0]?.meta.feature === scanner.feature &&
+                json(nodes[0].payload) === json(ast),
+            ).pipe(within(cwd, flagsOn))
+          },
+          { runs: 150, seed: 11 },
+        )
+        expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
+      }),
+    )
+  }
+})
+
+describe('literal readings', () => {
+  for (const body of program.bodies) {
+    it.effect(`${body.feature} tokens with a literal reading splice exactly that reading`, () =>
+      Effect.gen(function* () {
+        const result = yield* Arbitrary.checkEffect(
+          Arbitrary.all([prose, tokens(body, ['lead', 'prefix', 'suffix'])]),
+          ([{ left, right }, { token }]) =>
+            Effect.gen(function* () {
+              const text = `${left} ${token} ${right}`
+              const [node] = yield* recognize(program, text, whole)
+              if (node === undefined) return false
+              const literal = program.literal(node)
+              const leads = program.fragments.filter(
+                (fragment) => fragment.position === 'lead' && node.meta.marks[fragment.feature] !== undefined,
+              )
+              if (
+                leads.length > 0 &&
+                literal?.text !==
+                  token.slice(
+                    leads.reduce((size, fragment) => size + (node.meta.marks[fragment.feature] ?? '').length, 0),
+                  )
+              )
+                return false
+              if (literal === undefined) return true
+              const expected =
+                literal.collapse && literal.text === '' ? `${left} ${right}` : `${left} ${literal.text} ${right}`
+              return (yield* expandText(text)) === expected
+            }).pipe(within(cwd)),
+          { runs: 120, seed: 13 },
+        )
+        expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
+      }),
+    )
+  }
+})
+
+describe('quota conservation', () => {
+  const numeric = settingsOf(program).filter((setting) => typeof setting.fallback === 'number')
+  const short = Arbitrary.schema(Schema.String.check(Schema.isPattern(/^[a-z \n]{0,10}$/)))
+  const long = Arbitrary.schema(Schema.String.check(Schema.isPattern(/^[a-z \n]{240,600}$/)))
+  it.effect.prop(
+    'payload transforms keep head plus tail plus hidden equal to the original',
+    [
+      Arbitrary.flatMap(Arbitrary.schema(Schema.Boolean), (big) => (big ? long : short)),
+      Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 12, maximum: 200 }))),
+    ],
+    ([text, limit]) =>
+      Effect.gen(function* () {
+        const source = new Source({
+          tag: 'probe',
+          attrs: [],
+          identity: '',
+          label: 'probe',
+          scope: cwd,
+          kind: 'txt',
+          text,
+          extent: whole,
+        })
+        const payload = yield* program.payload(source, text)
+        if (payload.hidden === 0) return payload.body === text && text.length <= limit
+        let prefix = 0
+        while (prefix < text.length && payload.body[prefix] === text[prefix]) prefix++
+        let suffix = 0
+        while (
+          suffix < text.length - prefix &&
+          payload.body[payload.body.length - 1 - suffix] === text[text.length - 1 - suffix]
+        )
+          suffix++
+        return prefix + suffix + payload.hidden === text.length && payload.body.length < text.length
+      }).pipe(within(cwd, Object.fromEntries(numeric.map((setting) => [setting.key, limit])))),
+    { arbitrary: { runs: 200, seed: 5 } },
+  )
+})
+
+const yieldBody = (index: number): (typeof program.bodies)[number] => {
+  const body = program.bodies.at(index % Math.max(1, program.bodies.length))
+  if (body === undefined) throw new Error('the synthesized program contributes no token bodies')
+  return body
+}
+
+const PATHLIKE = /^[a-z0-9_ -]+(?:\/[a-z0-9_ -]+)*\.[a-z]{1,3}$/
+
+const pathsIn = (value: unknown): ReadonlyArray<string> =>
+  value !== null && typeof value === 'object'
+    ? Object.values(value).flatMap(pathsIn)
+    : typeof value === 'string'
+      ? [value.split('#')[0] ?? ''].filter((path) => PATHLIKE.test(path))
+      : []
+
+const canonical = (text: string): ReadonlyArray<string> =>
+  program.chunks(text).flatMap((chunk) => (chunk.identity === '' ? [] : [chunk.identity]))
+
+const unique = (items: ReadonlyArray<string>): boolean => new Set(items).size === items.length
+
+const interpolating = (text: string) =>
+  Effect.map(recognize(program, text, whole), (nodes) =>
+    nodes.some(
+      (node) =>
+        !verdict(
+          program.enveloping.map((policy) => policy(node)),
+          true,
+        ),
+    ),
+  )
+
+describe('expansion over a scratch project', () => {
+  const lines = Arbitrary.array(
+    Arbitrary.all([
+      Arbitrary.schema(
+        Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Math.max(0, program.bodies.length - 1) })),
+      ),
+      Arbitrary.schema(Schema.Literals(['standalone', 'inline', 'fenced'])),
+      prose,
+    ]),
+    { maxLength: 8 },
+  )
+  const documents = Arbitrary.flatMap(lines, (shape) =>
+    Arbitrary.map(Arbitrary.all(shape.map(([index]) => tokens(yieldBody(index), ['prefix', 'suffix']))), (generated) =>
+      generated.flatMap((sample, position) => {
+        const row = shape[position]
+        return row === undefined ? [] : [[row, sample] as const]
+      }),
+    ),
+  )
+
+  const scenario = (
+    law: (fixture: {
+      readonly root: string
+      readonly text: string
+      readonly fenced: ReadonlyArray<string>
+    }) => Effect.Effect<boolean>,
+  ) =>
+    Effect.gen(function* () {
+      const result = yield* Arbitrary.checkEffect(
+        documents,
+        (rows) =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              const root = yield* scratch
+              const echoes = rows.map(([, sample]) => sample.token).join('\n')
+              const files = Object.fromEntries(
+                rows.flatMap(([, sample]) =>
+                  pathsIn(sample.ast).map((path) => [path, `${path} body\n${echoes}\n`] as const),
+                ),
+              )
+              yield* plant(root, files)
+              const blocks = rows.map(([[, place, { left, right }], { token }]) =>
+                place === 'standalone'
+                  ? token
+                  : place === 'inline'
+                    ? `${left} ${token} ${right}`
+                    : `~~~~\n${token}\n~~~~`,
+              )
+              const fenced = blocks.filter((_, index) => rows[index]?.[0][1] === 'fenced')
+              return yield* law({ root, text: blocks.join('\n\n'), fenced })
+            }),
+          ),
+        { runs: 60, seed: 3 },
+      )
+      expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
+    })
+
+  it.live('expanding an expansion changes nothing when no payload is interpolated', () =>
+    scenario(({ root, text }) =>
+      Effect.gen(function* () {
+        if (yield* interpolating(text)) return true
+        const once = yield* expandText(text)
+        return (yield* expandText(once)) === once
+      }).pipe(within(root)),
+    ),
+  )
+
+  it.live('doubling a document never doubles a canonical source', () =>
+    scenario(({ root, text }) =>
+      Effect.map(expandText(`${text}\n\n${text}`), (output) => unique(canonical(output))).pipe(within(root)),
+    ),
+  )
+
+  it.live('sources already present in the input are attested instead of repeated', () =>
+    scenario(({ root, text }) =>
+      Effect.gen(function* () {
+        const once = yield* expandText(text)
+        return unique(canonical(yield* expandText(`${once}\n\n${text}`)))
+      }).pipe(within(root)),
+    ),
+  )
+
+  it.live('host-language code blocks survive verbatim', () =>
+    scenario(({ root, text, fenced }) =>
+      Effect.map(expandText(text), (output) => fenced.every((block) => output.includes(block))).pipe(within(root)),
+    ),
+  )
+
+  assert.isTrue(program.bodies.length > 0)
+})

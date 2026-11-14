@@ -1,0 +1,6 @@
+node_modules/
+dist/
+coverage/
+*.log
+demo/*_.md
+demo/*_[0-9][0-9].md
