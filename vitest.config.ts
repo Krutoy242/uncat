@@ -10,6 +10,8 @@ const config: ReturnType<typeof defineConfig> = defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     testTimeout: 60_000,
+    fileParallelism: false,
+    isolate: false,
   },
 })
 

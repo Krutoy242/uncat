@@ -1,13 +1,12 @@
 /*
- * Human presenter: a live heads-up display sized to the terminal that draws
- * the expansion tree, progress, elapsed time, volume, faults and slicing as
- * glyphs while work runs, then prints a rendered markdown summary at the end.
+ * Human presenter that draws a live heads-up display sized to the terminal,
+ * rendering progress and volume while work runs and markdown when finished.
  */
 import { intro, log, outro } from '@clack/prompts'
 import { Context, Effect, Layer } from 'effect'
 import { HookableCore } from 'hookable'
 import { init, renderToAnsi } from 'md4x/standalone'
-import { hasTTY, isAgent, isCI } from 'std-env'
+import { hasTTY, isCI } from 'std-env'
 import { Ambient } from '../kernel/index.ts'
 import { Outcome, Presenter, Signal } from '../program/model.ts'
 import { Feature, defineFeature } from '../program/program.ts'
@@ -115,44 +114,63 @@ class Board {
   }
 }
 
-class HudPort extends Context.Service<HudPort>()('uncat/hud/HudPort', {
-  make: Effect.sync(() => {
-    const board = new Board()
-    const bus = new HookableCore<{ signal: (signal: Signal) => void }>()
-    const stream = process.stderr
-    let drawn = 0
-    let last = 0
-    const erase = (): void => {
-      if (drawn > 0) stream.write(`\u001b[${drawn}F\u001b[J`)
-      drawn = 0
+const makeHudPort = () => {
+  const board = new Board()
+  const bus = new HookableCore<{ signal: (signal: Signal) => void }>()
+  const stream = process.stderr
+  let drawn = 0
+  let last = 0
+  const erase = (): void => {
+    if (drawn > 0) stream.write(`\u001b[${drawn}F\u001b[J`)
+    drawn = 0
+  }
+  const draw = (force: boolean): void => {
+    const now = performance.now()
+    if (!stream.isTTY || (!force && now - last < 60)) return
+    last = now
+    const lines = board.lines(stream.columns || 80, stream.rows || 24)
+    erase()
+    stream.write(`${lines.join('\n')}\n`)
+    drawn = lines.length
+  }
+  bus.hook('signal', (signal) => {
+    if (signal.kind === 'begin') {
+      board.rows.clear()
+      board.shards.length = 0
+      board.notes.length = 0
+      board.finished = 0
+      board.ticks = 0
     }
-    const draw = (force: boolean): void => {
-      const now = performance.now()
-      if (!stream.isTTY || (!force && now - last < 60)) return
-      last = now
-      const lines = board.lines(stream.columns || 80, stream.rows || 24)
+    board.apply(signal)
+    draw(signal.kind === 'end')
+  })
+  return {
+    push: (signal: Signal): void => void bus.callHook('signal', signal),
+    settle: (): ReadonlyArray<string> => {
       erase()
-      stream.write(`${lines.join('\n')}\n`)
-      drawn = lines.length
-    }
-    bus.hook('signal', (signal) => {
-      board.apply(signal)
-      draw(signal.kind === 'end')
-    })
-    return {
-      push: (signal: Signal): void => void bus.callHook('signal', signal),
-      settle: (): ReadonlyArray<string> => {
-        erase()
-        return board.lines(stream.columns || 80, Number.MAX_SAFE_INTEGER)
-      },
-    }
-  }),
+      return board.lines(stream.columns || 80, Number.MAX_SAFE_INTEGER)
+    },
+  }
+}
+
+let hudService: ReturnType<typeof makeHudPort> | undefined
+
+class HudPort extends Context.Service<HudPort>()('uncat/hud/HudPort', {
+  make: Effect.sync(() => (hudService ??= makeHudPort())),
 }) {
   static readonly layer: Layer.Layer<HudPort> = Layer.unwrap(Effect.sync(() => Layer.effect(HudPort, HudPort.make)))
 }
 
+let markdownReady: Promise<void> | undefined
+
 class MarkdownPort extends Context.Service<MarkdownPort>()('uncat/hud/MarkdownPort', {
-  make: Effect.promise(() => init()).pipe(Effect.as({ render: (markdown: string): string => renderToAnsi(markdown) })),
+  make: Effect.sync(() => ({
+    render: (markdown: string): Effect.Effect<string> =>
+      Effect.promise(async () => {
+        await (markdownReady ??= init())
+        return renderToAnsi(markdown)
+      }),
+  })),
 }) {
   static readonly layer: Layer.Layer<MarkdownPort> = Layer.unwrap(
     Effect.sync(() => Layer.effect(MarkdownPort, MarkdownPort.make)),
@@ -177,7 +195,7 @@ const summary = (outcome: Outcome): string => {
 export const feature: Feature = defineFeature({
   name: NAME,
   refine: (_, base) => ({
-    layers: [...base.layers, HudPort.layer],
+    layers: [...base.layers, HudPort.layer, MarkdownPort.layer],
     observe: (signal) =>
       Effect.gen(function* () {
         yield* base.observe(signal)
@@ -190,7 +208,7 @@ export const feature: Feature = defineFeature({
       ...base.presenters,
       new Presenter({
         name: NAME,
-        auto: () => hasTTY && !isCI && !isAgent,
+        auto: () => hasTTY && (process.stderr.isTTY ?? false) && !isCI,
         present: (outcome) =>
           Effect.gen(function* () {
             const hud = yield* HudPort
@@ -198,9 +216,10 @@ export const feature: Feature = defineFeature({
             const tree = hud.settle()
             if (outcome.toStdout) process.stdout.write(outcome.text.endsWith('\n') ? outcome.text : `${outcome.text}\n`)
             const output = outcome.toStdout ? process.stderr : process.stdout
+            const rendered = yield* markdown.render(summary(outcome))
             intro('uncat', { output })
             log.message(tree.join('\n'), { output, symbol: '◇' })
-            log.message(markdown.render(summary(outcome)).trimEnd(), { output })
+            log.message(rendered.trimEnd(), { output })
             for (const diagnostic of outcome.report.diagnostics) {
               log.error(`${diagnostic.message}${diagnostic.hint === '' ? '' : `\n${diagnostic.hint}`}`, { output })
             }

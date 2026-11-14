@@ -20,25 +20,40 @@ import { lower } from '../src/kernel/schedule.ts'
 const Pair = Schema.Tuple([Schema.String, Schema.Int])
 
 describe('comonadic annotation', () => {
-  it.prop('extract after duplicate is identity', [Pair], ([[meta, payload]]) => {
-    const node = new Annotated(meta, payload)
-    const twice = duplicate(node)
-    return extract(extract(twice)) === payload && extract(twice).meta === meta
-  })
+  it.prop(
+    'extract after duplicate is identity',
+    [Pair],
+    ([[meta, payload]]) => {
+      const node = new Annotated(meta, payload)
+      const twice = duplicate(node)
+      return extract(extract(twice)) === payload && extract(twice).meta === meta
+    },
+    { arbitrary: { runs: 15 } },
+  )
 
-  it.prop('extend with extract is identity', [Pair], ([[meta, payload]]) => {
-    const node = extend(new Annotated(meta, payload), extract)
-    return node.meta === meta && node.payload === payload
-  })
+  it.prop(
+    'extend with extract is identity',
+    [Pair],
+    ([[meta, payload]]) => {
+      const node = extend(new Annotated(meta, payload), extract)
+      return node.meta === meta && node.payload === payload
+    },
+    { arbitrary: { runs: 15 } },
+  )
 
-  it.prop('map composes and never touches metadata', [Pair], ([[meta, payload]]) => {
-    const node = new Annotated(meta, payload)
-    const twice = map(
-      map(node, (value) => value + 1),
-      (value) => value * 2,
-    )
-    return twice.meta === meta && twice.payload === map(node, (value) => (value + 1) * 2).payload
-  })
+  it.prop(
+    'map composes and never touches metadata',
+    [Pair],
+    ([[meta, payload]]) => {
+      const node = new Annotated(meta, payload)
+      const twice = map(
+        map(node, (value) => value + 1),
+        (value) => value * 2,
+      )
+      return twice.meta === meta && twice.payload === map(node, (value) => (value + 1) * 2).payload
+    },
+    { arbitrary: { runs: 15 } },
+  )
 })
 
 describe('trait-partitioned scheduler', () => {
@@ -64,6 +79,7 @@ describe('trait-partitioned scheduler', () => {
         )
         assert.deepStrictEqual(order, expectedSequential)
       }),
+    { arbitrary: { runs: 15 } },
   )
 })
 

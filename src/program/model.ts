@@ -181,7 +181,11 @@ export class Setting<out A> {
     this.codec = spec.codec
     this.fallback = spec.fallback
     const guard = Schema.decodeUnknownSync(Schema.toType(spec.codec))
-    this.read = Effect.map(Ambient.Current, (frame) => guard(frame.settings[spec.key] ?? spec.fallback))
+    this.read = Effect.map(Ambient.Current, (frame) => {
+      const raw = frame.settings[spec.key]
+      if (raw === undefined || raw === spec.fallback) return spec.fallback
+      return guard(raw)
+    })
   }
 }
 

@@ -11,13 +11,17 @@ import { glob } from 'tinyglobby'
 
 const root = new URL('..', import.meta.url).pathname
 
-const sources = Effect.promise(async () => {
+let cachedSources: Promise<ReadonlyArray<{ readonly file: string; readonly text: string }>> | undefined
+
+const loadSources = async (): Promise<ReadonlyArray<{ readonly file: string; readonly text: string }>> => {
   const files = await glob(['src/**/*.ts', 'tests/**/*.ts', 'build/**/*.ts', 'scripts/**/*.ts', '*.ts'], {
     cwd: root,
     absolute: true,
   })
   return Promise.all(files.map(async (file) => ({ file: relative(root, file), text: await readFile(file, 'utf8') })))
-})
+}
+
+const sources = Effect.promise(() => (cachedSources ??= loadSources()))
 
 const forbidden: ReadonlyArray<readonly [string, RegExp]> = [
   ['type-only import', /^\s*import\s+type\b|import\s*\{[^}]*\btype\s+\w/m],

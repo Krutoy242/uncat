@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
 import { Effect, Scope } from 'effect'
 import * as Ambient from '../src/kernel/ambient.ts'
 import { expand, render } from '../src/program/engine.ts'
-import { settingsOf, shared } from '../src/program/run.ts'
+import { settingsOf } from '../src/program/run.ts'
 import { program } from '../src/program/synthesis.ts'
 
 export const defaults: Readonly<Record<string, unknown>> = Object.fromEntries(
@@ -28,10 +28,9 @@ export const within =
           root,
           depth: 0,
           lineage: [],
-          settings: { ...defaults, shell: false, mode: 'raw', ...settings },
+          settings: { ...defaults, depth: 2, shell: false, mode: 'raw', ...settings },
         }),
       ),
-      Effect.provide(shared(program)),
     )
 
 export const expandText = (text: string): Effect.Effect<string> =>
@@ -47,8 +46,11 @@ export const scratch: Effect.Effect<string, never, Scope.Scope> = Effect.acquire
 
 export const plant = (root: string, files: Readonly<Record<string, string>>): Effect.Effect<void> =>
   Effect.promise(async () => {
-    for (const [path, text] of Object.entries(files)) {
-      await mkdir(dirname(join(root, path)), { recursive: true })
-      await writeFile(join(root, path), text)
-    }
+    await Promise.all(
+      Object.entries(files).map(async ([path, text]) => {
+        const full = join(root, path)
+        await mkdir(dirname(full), { recursive: true })
+        await writeFile(full, text)
+      }),
+    )
   })

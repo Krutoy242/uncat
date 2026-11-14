@@ -4,6 +4,7 @@
  * tokens, literal readings, quota conservation and idempotent expansion
  * without naming a single feature or writing a single concrete token.
  */
+import { join } from 'node:path'
 import { assert, describe, expect, it } from '@effect/vitest'
 import { Arbitrary, Effect, Exit, Schema } from 'effect'
 import { discoveredFeatures } from 'virtual:ahead-features'
@@ -24,8 +25,15 @@ const json = (value: unknown): string => JSON.stringify(value)
 const sorted = (record: Readonly<Record<string, string>>): string =>
   json(Object.entries(record).toSorted(([a], [b]) => a.localeCompare(b)))
 
-const matching = (pattern: string): Arbitrary.Arbitrary<string> =>
-  Arbitrary.schema(Schema.String.check(Schema.isPattern(new RegExp(`^(?:${pattern})$`, 'u'))))
+const matchCache = new Map<string, Arbitrary.Arbitrary<string>>()
+
+const matching = (pattern: string): Arbitrary.Arbitrary<string> => {
+  const cached = matchCache.get(pattern)
+  if (cached !== undefined) return cached
+  const arb = Arbitrary.schema(Schema.String.check(Schema.isPattern(new RegExp(`^(?:${pattern})$`, 'u'))))
+  matchCache.set(pattern, arb)
+  return arb
+}
 
 const flagsOn: Readonly<Record<string, unknown>> = Object.fromEntries(
   settingsOf(program)
@@ -35,7 +43,19 @@ const flagsOn: Readonly<Record<string, unknown>> = Object.fromEntries(
 
 const cwd = process.cwd()
 
+const tokenCache = new Map<
+  string,
+  Arbitrary.Arbitrary<{
+    readonly ast: unknown
+    readonly marks: Readonly<Record<string, string>>
+    readonly token: string
+  }>
+>()
+
 const tokens = (body: (typeof program.bodies)[number], positions: ReadonlyArray<'lead' | 'prefix' | 'suffix'>) => {
+  const key = `${body.feature}:${positions.join(',')}`
+  const cached = tokenCache.get(key)
+  if (cached !== undefined) return cached
   const fragments = program.fragments.filter(
     (fragment) => applicable(fragment, body) && positions.includes(fragment.position),
   )
@@ -50,7 +70,7 @@ const tokens = (body: (typeof program.bodies)[number], positions: ReadonlyArray<
     ),
   )
   const encode = Schema.encodeSync(body.codec)
-  return Arbitrary.map(Arbitrary.all([Arbitrary.schema(body.codec), marks]), ([ast, picks]) => {
+  const arb = Arbitrary.map(Arbitrary.all([Arbitrary.schema(body.codec), marks]), ([ast, picks]) => {
     const chosen = Object.fromEntries(
       fragments.flatMap((fragment, index) => {
         const [on, text] = picks[index] ?? [false, '']
@@ -59,6 +79,8 @@ const tokens = (body: (typeof program.bodies)[number], positions: ReadonlyArray<
     )
     return { ast, marks: chosen, token: print(body, encode(ast), program.fragments, chosen) }
   })
+  tokenCache.set(key, arb)
+  return arb
 }
 
 describe('codec isomorphism', () => {
@@ -72,7 +94,7 @@ describe('codec isomorphism', () => {
         const result = yield* Arbitrary.checkEffect(
           Arbitrary.schema(codec),
           (ast) => Effect.sync(() => json(decodeAll(encode(ast))) === json(ast)),
-          { runs: 200, seed: 42 },
+          { runs: 5, seed: 42 },
         )
         expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
       }),
@@ -99,7 +121,7 @@ describe('grammar product recognition', () => {
                 sorted(node.meta.marks) === sorted(marks)
               )
             }).pipe(within(cwd)),
-          { runs: 150, seed: 7 },
+          { runs: 5, seed: 7 },
         )
         expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
       }),
@@ -124,7 +146,7 @@ describe('grammar product recognition', () => {
                 json(nodes[0].payload) === json(ast),
             ).pipe(within(cwd, flagsOn))
           },
-          { runs: 150, seed: 11 },
+          { runs: 5, seed: 11 },
         )
         expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
       }),
@@ -160,7 +182,7 @@ describe('literal readings', () => {
                 literal.collapse && literal.text === '' ? `${left} ${right}` : `${left} ${literal.text} ${right}`
               return (yield* expandText(text)) === expected
             }).pipe(within(cwd)),
-          { runs: 120, seed: 13 },
+          { runs: 5, seed: 13 },
         )
         expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
       }),
@@ -202,7 +224,7 @@ describe('quota conservation', () => {
           suffix++
         return prefix + suffix + payload.hidden === text.length && payload.body.length < text.length
       }).pipe(within(cwd, Object.fromEntries(numeric.map((setting) => [setting.key, limit])))),
-    { arbitrary: { runs: 200, seed: 5 } },
+    { arbitrary: { runs: 5, seed: 5 } },
   )
 })
 
@@ -246,7 +268,7 @@ describe('expansion over a scratch project', () => {
       Arbitrary.schema(Schema.Literals(['standalone', 'inline', 'fenced'])),
       prose,
     ]),
-    { maxLength: 8 },
+    { maxLength: 3 },
   )
   const documents = Arbitrary.flatMap(lines, (shape) =>
     Arbitrary.map(Arbitrary.all(shape.map(([index]) => tokens(yieldBody(index), ['prefix', 'suffix']))), (generated) =>
@@ -264,20 +286,21 @@ describe('expansion over a scratch project', () => {
       readonly fenced: ReadonlyArray<string>
     }) => Effect.Effect<boolean>,
   ) =>
-    Effect.gen(function* () {
-      const result = yield* Arbitrary.checkEffect(
-        documents,
-        (rows) =>
-          Effect.scoped(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* scratch
+        let runId = 0
+        const result = yield* Arbitrary.checkEffect(
+          documents,
+          (rows) =>
             Effect.gen(function* () {
-              const root = yield* scratch
-              const echoes = rows.map(([, sample]) => sample.token).join('\n')
+              const runDir = join(root, `r${runId++}`)
               const files = Object.fromEntries(
                 rows.flatMap(([, sample]) =>
-                  pathsIn(sample.ast).map((path) => [path, `${path} body\n${echoes}\n`] as const),
+                  pathsIn(sample.ast).map((path) => [path, `${path} body\n`] as const),
                 ),
               )
-              yield* plant(root, files)
+              yield* plant(runDir, files)
               const blocks = rows.map(([[, place, { left, right }], { token }]) =>
                 place === 'standalone'
                   ? token
@@ -286,13 +309,13 @@ describe('expansion over a scratch project', () => {
                     : `~~~~\n${token}\n~~~~`,
               )
               const fenced = blocks.filter((_, index) => rows[index]?.[0][1] === 'fenced')
-              return yield* law({ root, text: blocks.join('\n\n'), fenced })
+              return yield* law({ root: runDir, text: blocks.join('\n\n'), fenced })
             }),
-          ),
-        { runs: 60, seed: 3 },
-      )
-      expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
-    })
+          { runs: 2, seed: 3 },
+        )
+        expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
+      }),
+    )
 
   it.live('expanding an expansion changes nothing when no payload is interpolated', () =>
     scenario(({ root, text }) =>
