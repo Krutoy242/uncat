@@ -234,13 +234,20 @@ const yieldBody = (index: number): (typeof program.bodies)[number] => {
   return body
 }
 
-const PATHLIKE = /^[a-z0-9_ -]+(?:\/[a-z0-9_ -]+)*\.[a-z]{1,3}$/
+const PATHLIKE = /^\.?[a-z0-9_ -]+(?:\/\.?[a-z0-9_ -]+)*\.[a-z]{1,3}$/
+
+const DIRLIKE = /^\.?[a-z0-9_ -]+(?:\/\.?[a-z0-9_ -]+)*$/
+
+const materialize = (raw: string): ReadonlyArray<string> => {
+  const clean = (raw.split('#')[0] ?? '').replace(/\*\*\//g, '.d/').replace(/\*/g, 'leaf')
+  return PATHLIKE.test(clean) ? [clean] : DIRLIKE.test(clean) ? [`${clean}/.leaf.txt`] : []
+}
 
 const pathsIn = (value: unknown): ReadonlyArray<string> =>
   value !== null && typeof value === 'object'
     ? Object.values(value).flatMap(pathsIn)
     : typeof value === 'string'
-      ? [value.split('#')[0] ?? ''].filter((path) => PATHLIKE.test(path))
+      ? materialize(value)
       : []
 
 const canonical = (text: string): ReadonlyArray<string> =>

@@ -9,7 +9,7 @@ import { Feature, defineFeature, owns } from '../program/program.ts'
 
 const NAME = 'aggressive'
 
-const SEGMENT = String.raw`[\p{L}\p{N}_@+-][\p{L}\p{N}_.@+-]*`
+const SEGMENT = String.raw`\.?[\p{L}\p{N}_@+-][\p{L}\p{N}_.@+-]*`
 
 const BARE = String.raw`(?:\.{1,2}[\\/]|~[\\/]|/)?${SEGMENT}(?:[\\/]${SEGMENT})*\.[\p{L}\p{N}]{1,10}`
 
@@ -24,7 +24,7 @@ class BareToken extends Schema.Class<BareToken>('uncat/aggressive/BareToken')({
   path: Schema.String.check(
     Schema.isPattern(new RegExp(`^${BARE}$`, 'u'), {
       arbitraryConstraint: {
-        patterns: [{ source: '^[a-z0-9_-]{1,8}(?:/[a-z0-9_-]{1,8}){0,2}\\.[a-z]{1,3}$', flags: '' }],
+        patterns: [{ source: '^\\.?[a-z0-9_-]{1,8}(?:/\\.?[a-z0-9_-]{1,8}){0,2}\\.[a-z]{1,3}$', flags: '' }],
       },
     }),
   ),

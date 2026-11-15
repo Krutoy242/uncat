@@ -25,7 +25,9 @@ const LIMIT = 5_000
 class GlobToken extends Schema.Class<GlobToken>('uncat/glob/GlobToken')({
   pattern: Schema.String.check(
     Schema.isPattern(new RegExp(`^${PATTERN}$`, 'u'), {
-      arbitraryConstraint: { patterns: [{ source: '^[a-z0-9_-]{1,8}/(?:\\*\\*/)?\\*\\.[a-z]{1,3}$', flags: '' }] },
+      arbitraryConstraint: {
+        patterns: [{ source: '^\\.?[a-z0-9_-]{1,8}/(?:\\*\\*/)?\\*\\.[a-z]{1,3}$', flags: '' }],
+      },
     }),
   ),
 }) {}
@@ -37,14 +39,24 @@ const syntaxCodec = Schema.String.pipe(
   }),
 )
 
-const rules = async (from: string, root: string): Promise<ReadonlyArray<readonly [string, string]>> => {
-  const directories: Array<string> = []
-  for (let current = from; ; current = dirname(current)) {
-    directories.push(current)
+const rules = async (
+  from: string,
+  root: string,
+  files: ReadonlyArray<string>,
+): Promise<ReadonlyArray<readonly [string, string]>> => {
+  const directories = new Set<string>()
+  for (let current = resolve(from); ; current = dirname(current)) {
+    directories.add(current)
     if (current === root || dirname(current) === current || !current.startsWith(root)) break
   }
+  for (const file of files) {
+    for (let current = dirname(resolve(file)); !directories.has(current); current = dirname(current)) {
+      directories.add(current)
+      if (dirname(current) === current || !current.startsWith(root)) break
+    }
+  }
   const found = await Promise.all(
-    directories.map((directory) =>
+    [...directories].map((directory) =>
       readFile(join(directory, '.gitignore'), 'utf8').then(
         (text) => [directory, text] as const,
         () => undefined,
@@ -62,11 +74,13 @@ class GlobPort extends Context.Service<GlobPort>()('uncat/glob/GlobPort', {
           const files = await glob(pattern, {
             cwd,
             absolute: true,
-            dot: !respect,
+            dot: true,
             ignore: respect ? ['**/.git/**', '**/node_modules/**'] : [],
           })
           if (!respect) return files.toSorted()
-          const filters = (await rules(cwd, root)).map(([directory, text]) => [directory, ignore().add(text)] as const)
+          const filters = (await rules(cwd, root, files)).map(
+            ([directory, text]) => [directory, ignore().add(text)] as const,
+          )
           return files
             .filter((file) =>
               filters.every(([directory, matcher]) => {

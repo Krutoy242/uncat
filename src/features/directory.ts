@@ -11,14 +11,18 @@ import { Feature, defineFeature, owns, whole } from '../program/program.ts'
 
 const NAME = 'directory'
 
-const PATTERN = String.raw`(?:[A-Za-z]:(?=[\\/]))?(?:[\p{L}\p{N}_~+%@-]|\.(?=[\p{L}\p{N}_~+%@./-])|/(?=[\p{L}\p{N}_~+%@.-]))+/`
+const BODY = String.raw`(?:[A-Za-z]:(?=[\\/]))?(?:[\p{L}\p{N}_~+%@-]|\.(?=$|[\p{L}\p{N}_~+%@./-])|/(?=[\p{L}\p{N}_~+%@.-]))+`
+
+const PATTERN = `${BODY}/`
 
 const LIMIT = 2_000
 
 class DirectoryToken extends Schema.Class<DirectoryToken>('uncat/directory/DirectoryToken')({
   path: Schema.String.check(
-    Schema.isPattern(new RegExp(`^${PATTERN.slice(0, -1)}$`, 'u'), {
-      arbitraryConstraint: { patterns: [{ source: '^[a-z0-9_-]{1,8}(?:/[a-z0-9_-]{1,8}){0,2}$', flags: '' }] },
+    Schema.isPattern(new RegExp(`^${BODY}$`, 'u'), {
+      arbitraryConstraint: {
+        patterns: [{ source: '^\\.?[a-z0-9_-]{1,8}(?:/\\.?[a-z0-9_-]{1,8}){0,2}$', flags: '' }],
+      },
     }),
   ),
 }) {}

@@ -19,7 +19,12 @@ class FileToken extends Schema.Class<FileToken>('uncat/file/FileToken')({
   path: Schema.String.check(
     Schema.isPattern(new RegExp(`^${PATH}$`, 'u'), {
       arbitraryConstraint: {
-        patterns: [{ source: '^[a-z0-9_-]{1,8}(?:/[a-z0-9_-]{1,8}){0,2}\\.[a-z]{1,3}$', flags: '' }],
+        patterns: [
+          {
+            source: '^\\.?[a-z0-9_-]{1,8}(?:/\\.?[a-z0-9_-]{1,8}){0,2}\\.[a-z]{1,3}$',
+            flags: '',
+          },
+        ],
       },
     }),
   ),

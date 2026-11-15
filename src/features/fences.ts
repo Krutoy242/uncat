@@ -34,23 +34,26 @@ const fenced = (text: string): ReadonlyArray<readonly [number, number]> => {
   return ranges
 }
 
-const INLINE = /(?<!`)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g
+const INLINE = /(?<!`)(`+)(?!`)((?:(?!\n\n)[\s\S])*?[^`])\1(?!`)/g
 
 const spans = (text: string, hidden: mr.MIR): ReadonlyArray<readonly [number, number]> =>
-  [...text.matchAll(INLINE)]
-    .filter((match) => !mr.has(hidden, [[match.index, match.index]]) && !(match[2] ?? '').includes('\n\n'))
-    .map((match) => {
-      const size = (match[1] ?? '').length
-      return [match.index + size, match.index + match[0].length - size - 1] as const
-    })
+  text.length === 0
+    ? []
+    : mr.subtract([[0, text.length - 1]], hidden).flatMap(([from, to]) =>
+        [...text.slice(from, to + 1).matchAll(INLINE)].map((match) => {
+          const size = (match[1] ?? '').length
+          const start = from + match.index
+          return [start + size, start + match[0].length - size - 1] as const
+        }),
+      )
 
 export const feature: Feature = defineFeature({
   name: 'fences',
   refine: (_, base) => ({
     mask: (text) =>
       Effect.map(base.mask(text), (masked) => {
-        const blocks = mr.normalize(fenced(text))
-        return mr.append(masked, mr.append(blocks, mr.normalize(spans(text, blocks))))
+        const hidden = mr.append(masked, mr.normalize(fenced(text)))
+        return mr.append(hidden, mr.normalize(spans(text, hidden)))
       }),
   }),
 })
