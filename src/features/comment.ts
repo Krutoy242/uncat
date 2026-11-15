@@ -54,6 +54,8 @@ export const feature: Feature = defineFeature({
         priority: 30,
         label: verbatim,
         codec: syntaxCodec,
+        description: 'Comment stripped with surrounding whitespace',
+        samples: [new Word({ text: 'comment' }), new Bracketed({ text: 'spaced comment' })],
       }),
     ],
     literal: (node) =>

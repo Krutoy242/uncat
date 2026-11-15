@@ -87,7 +87,18 @@ export const feature: Feature = defineFeature({
   syntaxCodec,
   refine: (self, base) => ({
     layers: [...base.layers, LinkPort.layer],
-    scanners: [...base.scanners, new Scanner({ feature: NAME, priority: 5, tentative: false, scan })],
+    scanners: [
+      ...base.scanners,
+      new Scanner({
+        feature: NAME,
+        priority: 5,
+        tentative: false,
+        codec: syntaxCodec,
+        description: 'Bare file URI with optional line anchor',
+        samples: [new UriToken({ path: '/path/to/file.ts', fragment: 'L10-20' })],
+        scan,
+      }),
+    ],
     extent: (node) => {
       if (!owns(NAME)(node) || !Schema.is(UriToken)(node.payload)) return base.extent(node)
       const lines = lineFragment(node.payload.fragment)

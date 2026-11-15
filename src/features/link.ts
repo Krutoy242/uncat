@@ -70,6 +70,11 @@ export const feature: Feature = defineFeature({
         priority: 25,
         label: verbatim,
         codec: syntaxCodec,
+        description: 'Markdown link to a path or file URI',
+        samples: [
+          new LinkToken({ label: 'doc', target: 'path.ts' }),
+          new LinkToken({ label: 'doc', target: 'file:///path#L1-5' }),
+        ],
       }),
     ],
     extent: (node) => {

@@ -31,6 +31,8 @@ export const feature: Feature = defineFeature({
         sigils: ['@'],
         pattern: () => '=',
         codec: syntaxCodec,
+        description: 'Direct inclusion without recursive expansion',
+        samples: () => [new DirectMark({})],
       }),
     ],
     recursion: [...base.recursion, (node) => Effect.succeed(node.meta.marks[NAME] === undefined ? 'abstain' : 'no')],

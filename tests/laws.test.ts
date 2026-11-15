@@ -9,7 +9,7 @@ import { assert, describe, expect, it } from '@effect/vitest'
 import { Arbitrary, Effect, Exit, Schema } from 'effect'
 import { discoveredFeatures } from 'virtual:ahead-features'
 import { recognize } from '../src/program/engine.ts'
-import { applicable, decode, print } from '../src/program/grammar.ts'
+import { applicable, decode, encode, print, syntaxOf } from '../src/program/grammar.ts'
 import { Source } from '../src/program/model.ts'
 import { verdict, whole } from '../src/program/program.ts'
 import { settingsOf } from '../src/program/run.ts'
@@ -69,7 +69,6 @@ const tokens = (body: (typeof program.bodies)[number], positions: ReadonlyArray<
       ]),
     ),
   )
-  const encode = Schema.encodeSync(body.codec)
   const arb = Arbitrary.map(Arbitrary.all([Arbitrary.schema(body.codec), marks]), ([ast, picks]) => {
     const chosen = Object.fromEntries(
       fragments.flatMap((fragment, index) => {
@@ -77,7 +76,7 @@ const tokens = (body: (typeof program.bodies)[number], positions: ReadonlyArray<
         return on ? [[fragment.feature, text] as const] : []
       }),
     )
-    return { ast, marks: chosen, token: print(body, encode(ast), program.fragments, chosen) }
+    return { ast, marks: chosen, token: print(body, encode(body.codec, ast), program.fragments, chosen) }
   })
   tokenCache.set(key, arb)
   return arb
@@ -89,11 +88,10 @@ describe('codec isomorphism', () => {
     if (codec === undefined) continue
     it.effect(`${feature.name} decodes every encoding back to itself`, () =>
       Effect.gen(function* () {
-        const encode = Schema.encodeSync(codec)
         const decodeAll = Schema.decodeUnknownSync(codec)
         const result = yield* Arbitrary.checkEffect(
           Arbitrary.schema(codec),
-          (ast) => Effect.sync(() => json(decodeAll(encode(ast))) === json(ast)),
+          (ast) => Effect.sync(() => json(decodeAll(encode(codec, ast))) === json(ast)),
           { runs: 5, seed: 42 },
         )
         expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
@@ -129,15 +127,13 @@ describe('grammar product recognition', () => {
   }
 
   for (const scanner of program.scanners) {
-    const codec = discoveredFeatures.find((feature) => feature.name === scanner.feature)?.syntaxCodec
-    if (codec === undefined) continue
+    const codec = scanner.codec
     it.effect(`${scanner.feature} finds every encoding embedded in prose`, () =>
       Effect.gen(function* () {
-        const encode = Schema.encodeSync(codec)
         const result = yield* Arbitrary.checkEffect(
           Arbitrary.all([prose, Arbitrary.schema(codec)]),
           ([{ left, right }, ast]) => {
-            const token = encode(ast)
+            const token = encode(codec, ast)
             return Effect.map(
               recognize(program, `${left} ${token} ${right}`, whole),
               (nodes) =>
@@ -149,6 +145,37 @@ describe('grammar product recognition', () => {
           { runs: 5, seed: 11 },
         )
         expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
+      }),
+    )
+  }
+
+  const entries = syntaxOf(program)
+
+  it('every feature with a syntaxCodec contributes non-empty documented syntax', () => {
+    const documented = new Map(entries.map((entry) => [entry.feature, entry]))
+    for (const feature of discoveredFeatures) {
+      if (feature.syntaxCodec === undefined) continue
+      const entry = documented.get(feature.name)
+      assert.isDefined(entry, `${feature.name} is missing from syntaxOf(program)`)
+      assert.isAbove(entry.tokens.length, 0, `${feature.name} has no syntax sample tokens`)
+      assert.notStrictEqual(entry.description.trim(), '', `${feature.name} has an empty description`)
+    }
+  })
+
+  for (const entry of entries) {
+    it.effect(`${entry.feature} documented syntax tokens are recognized as full tokens`, () =>
+      Effect.gen(function* () {
+        for (const token of entry.tokens) {
+          const nodes = yield* recognize(program, `left ${token} right`, whole).pipe(within(cwd, flagsOn))
+          const [node] = nodes
+          assert.isTrue(
+            nodes.length === 1 &&
+              node !== undefined &&
+              node.meta.text === token &&
+              (node.meta.feature === entry.feature || node.meta.marks[entry.feature] !== undefined),
+            `${entry.feature}: ${token}`,
+          )
+        }
       }),
     )
   }

@@ -111,6 +111,8 @@ export const feature: Feature = defineFeature({
         priority: 10,
         label: verbatim,
         codec: syntaxCodec,
+        description: 'Shell command output',
+        samples: [new ShellToken({ command: 'ls -la' })],
       }),
     ],
     spawn: (command) =>

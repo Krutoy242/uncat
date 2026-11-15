@@ -85,6 +85,8 @@ export const feature: Feature = defineFeature({
         priority: 10,
         label: quoted,
         codec: syntaxCodec,
+        description: 'File content',
+        samples: [new FileToken({ path: 'file.txt' })],
       }),
     ],
     locate: (path) =>

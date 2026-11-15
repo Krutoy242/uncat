@@ -51,6 +51,13 @@ export const feature: Feature = defineFeature({
         sigils: [],
         pattern: () => PATTERN,
         codec: syntaxCodec,
+        description: 'Single line, line range, open-ended slice, or #L anchor',
+        samples: () => [
+          new SliceMark({ from: 15, to: 15 }),
+          new SliceMark({ from: 10, to: 50 }),
+          new SliceMark({ from: 15, to: 0 }),
+          new SliceMark({ from: 0, to: 15 }),
+        ],
       }),
     ],
     extent: (node) => {

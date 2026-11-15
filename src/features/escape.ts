@@ -24,7 +24,16 @@ export const feature: Feature = defineFeature({
   refine: (_, base) => ({
     fragments: [
       ...base.fragments,
-      new Fragment({ feature: NAME, position: 'lead', rank: 0, sigils: [], pattern: () => '\\\\', codec: syntaxCodec }),
+      new Fragment({
+        feature: NAME,
+        position: 'lead',
+        rank: 0,
+        sigils: [],
+        pattern: () => '\\\\',
+        codec: syntaxCodec,
+        description: 'Escaped literal token',
+        samples: () => [new EscapeMark({})],
+      }),
     ],
     literal: (node) => {
       const mark = node.meta.marks[NAME]

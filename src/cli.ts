@@ -7,6 +7,7 @@ import { stripVTControlCharacters, styleText } from 'node:util'
 import { cli } from 'cleye'
 import { Cause, Effect, Exit, Schema } from 'effect'
 import packageJson from '../package.json' with { type: 'json' }
+import { syntaxOf } from './program/grammar.ts'
 import { Request, execute, settingsOf } from './program/run.ts'
 import { program } from './program/synthesis.ts'
 
@@ -27,6 +28,8 @@ const flags = Object.fromEntries(
   ]),
 )
 
+const syntax = syntaxOf(program)
+
 const argv = cli({
   name: 'uncat',
   version: packageJson.version,
@@ -36,12 +39,7 @@ const argv = cli({
   booleanFlagNegation: true,
   help: {
     description: packageJson.description,
-    examples: [
-      'uncat prompt.md',
-      'uncat prompt.md context.md',
-      'echo "@src/index.ts" | uncat',
-      'uncat notes.md --mode json',
-    ],
+    examples: syntax.map((entry) => entry.tokens.join(', ')),
     render: (nodes, renderers) => {
       renderers.heading = (text: string) => paint(['bold', 'cyan'], text)
       const originalText = renderers.text.bind(renderers)
@@ -90,12 +88,14 @@ const argv = cli({
       }
       const originalSection = renderers.section.bind(renderers)
       renderers.section = (options) => {
-        if (options.title?.toLowerCase().includes('example') && typeof options.body === 'string') {
-          const body = options.body
-            .split('\n')
-            .map((line: string) => paint('cyan', line))
-            .join('\n')
-          return originalSection({ ...options, body })
+        if (options.title?.toLowerCase().includes('example')) {
+          const body = renderers.table({
+            tableData: syntax.map((entry) => [
+              entry.tokens.map((token) => paint('cyan', token)).join(', '),
+              entry.description,
+            ]),
+          })
+          return originalSection({ ...options, body, indentBody: 0 })
         }
         return originalSection(options)
       }

@@ -38,6 +38,8 @@ export const feature: Feature = defineFeature({
         sigils: [],
         pattern: escapeRegex,
         codec: syntaxCodec,
+        description: 'Raw string interpolation without wrapper tag',
+        samples: (sigil) => [new RawMark({ sigil })],
       }),
     ],
     enveloping: [...base.enveloping, (node) => (node.meta.marks[NAME] === undefined ? 'abstain' : 'no')],

@@ -31,6 +31,8 @@ export class Body extends Data.Class<{
   readonly priority: number
   readonly label: (body: string, suffix: string) => string
   readonly codec: Schema.Codec<unknown, string>
+  readonly description: string
+  readonly samples: ReadonlyArray<unknown>
 }> {}
 
 export const quoted = (body: string, suffix: string): string => `\`${body}${suffix}\``
@@ -46,13 +48,24 @@ export class Fragment extends Data.Class<{
   readonly sigils: ReadonlyArray<string>
   readonly pattern: (sigil: string) => string
   readonly codec: Schema.Codec<unknown, string>
+  readonly description: string
+  readonly samples: (sigil: string) => ReadonlyArray<unknown>
 }> {}
 
 export class Scanner extends Data.Class<{
   readonly feature: string
   readonly priority: number
   readonly tentative: boolean
+  readonly codec: Schema.Codec<unknown, string>
+  readonly description: string
+  readonly samples: ReadonlyArray<unknown>
   readonly scan: (text: string) => Effect.Effect<ReadonlyArray<Hit>>
+}> {}
+
+export class SyntaxEntry extends Data.Class<{
+  readonly feature: string
+  readonly tokens: ReadonlyArray<string>
+  readonly description: string
 }> {}
 
 export class Source extends Data.Class<{

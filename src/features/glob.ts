@@ -117,6 +117,8 @@ export const feature: Feature = defineFeature({
         priority: 15,
         label: quoted,
         codec: syntaxCodec,
+        description: 'Glob respecting .gitignore (anchored ./ skips ignore)',
+        samples: [new GlobToken({ pattern: 'path/**/*' }), new GlobToken({ pattern: './*' })],
       }),
     ],
     walk: (pattern, cwd, respect) =>

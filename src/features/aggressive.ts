@@ -65,7 +65,21 @@ export const feature: Feature = defineFeature({
   syntaxCodec,
   refine: (self, base) => ({
     settings: [...base.settings, enabled],
-    scanners: [...base.scanners, new Scanner({ feature: NAME, priority: 0, tentative: true, scan })],
+    scanners: [
+      ...base.scanners,
+      new Scanner({
+        feature: NAME,
+        priority: 0,
+        tentative: true,
+        codec: syntaxCodec,
+        description: 'Bare or inline-code path when -a is enabled',
+        samples: [
+          new BareToken({ path: 'path/file.ts', quoted: false }),
+          new BareToken({ path: 'path/file.ts', quoted: true }),
+        ],
+        scan,
+      }),
+    ],
     interpret: (node) =>
       owns(NAME)(node) && Schema.is(BareToken)(node.payload)
         ? Effect.map(self.open(node.payload.path.replaceAll('\\', '/')), (source) => [source])

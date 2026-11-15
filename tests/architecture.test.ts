@@ -5,11 +5,14 @@
  */
 import { readFile } from 'node:fs/promises'
 import { basename, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { glob } from 'tinyglobby'
+import { formatSyntaxMarkdown } from '../src/program/grammar.ts'
+import { program } from '../src/program/synthesis.ts'
 
-const root = new URL('..', import.meta.url).pathname
+const root = fileURLToPath(new URL('..', import.meta.url))
 
 let cachedSources: Promise<ReadonlyArray<{ readonly file: string; readonly text: string }>> | undefined
 
@@ -18,7 +21,12 @@ const loadSources = async (): Promise<ReadonlyArray<{ readonly file: string; rea
     cwd: root,
     absolute: true,
   })
-  return Promise.all(files.map(async (file) => ({ file: relative(root, file), text: await readFile(file, 'utf8') })))
+  return Promise.all(
+    files.map(async (file) => ({
+      file: relative(root, file).replaceAll('\\', '/'),
+      text: await readFile(file, 'utf8'),
+    })),
+  )
 }
 
 const sources = Effect.promise(() => (cachedSources ??= loadSources()))
@@ -86,6 +94,16 @@ describe('architecture', () => {
         assert.match(sentence, /^[A-Z][^.!?]*[.]$/, `${file}: header must be exactly one sentence`)
         assert.notMatch(text, /^\s*\/\/\s*\d+[.)]/m, `${file}: numbered comment`)
       }
+    }),
+  )
+
+  it.effect('README syntax block matches the synthesized program', () =>
+    Effect.gen(function* () {
+      const readmeUrl = new URL('../README.md', import.meta.url)
+      const readme = yield* Effect.promise(() => readFile(readmeUrl, 'utf8'))
+      const match = /<!--\s*syntax:start\b[^>]*-->\r?\n([\s\S]*?)\r?\n<!--\s*syntax:end\b[^>]*-->/.exec(readme)
+      assert.isNotNull(match, 'README.md lacks syntax:start / syntax:end markers')
+      assert.strictEqual(match?.[1]?.replaceAll('\r\n', '\n'), formatSyntaxMarkdown(program))
     }),
   )
 })

@@ -34,7 +34,7 @@
     "lint": "oxlint --type-aware --type-check --deny-warnings",
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
-    "demo": "node scripts/demo.ts",
+    "demo": "node --import ./build/register.ts scripts/demo.ts",
     "prepublishOnly": "pnpm check"
   },
   "devDependencies": {

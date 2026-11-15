@@ -43,6 +43,8 @@ export const feature: Feature = defineFeature({
         priority: 20,
         label: (body, suffix) => `\`${body.slice(1, -1)}${suffix}\``,
         codec: syntaxCodec,
+        description: 'Path with spaces or special characters',
+        samples: [new BracketToken({ path: 'file with spaces.txt' })],
       }),
     ],
     interpret: (node) =>

@@ -46,6 +46,8 @@ export const feature: Feature = defineFeature({
         priority: 40,
         label: () => '`clipboard`',
         codec: syntaxCodec,
+        description: 'System clipboard content',
+        samples: [new ClipboardToken({})],
       }),
     ],
     interpret: (node) =>

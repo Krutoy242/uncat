@@ -78,6 +78,8 @@ export const feature: Feature = defineFeature({
         priority: 12,
         label: quoted,
         codec: syntaxCodec,
+        description: 'Directory tree',
+        samples: [new DirectoryToken({ path: 'path' })],
       }),
     ],
     interpret: (node) => {
