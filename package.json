@@ -13,7 +13,7 @@
   ],
   "license": "MIT",
   "bin": {
-    "uncat": "./dist/cli.mjs"
+    "uncat": "dist/cli.mjs"
   },
   "files": [
     "dist"
