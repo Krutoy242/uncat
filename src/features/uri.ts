@@ -99,10 +99,10 @@ export const feature: Feature = defineFeature({
         scan,
       }),
     ],
-    extent: (node) => {
-      if (!owns(NAME)(node) || !Schema.is(UriToken)(node.payload)) return base.extent(node)
+    extent: (node, total) => {
+      if (!owns(NAME)(node) || !Schema.is(UriToken)(node.payload)) return base.extent(node, total)
       const lines = lineFragment(node.payload.fragment)
-      return lines === undefined ? base.extent(node) : mr.intersect(base.extent(node), lines)
+      return lines === undefined ? base.extent(node, total) : mr.intersect(base.extent(node, total), lines)
     },
     interpret: (node) =>
       owns(NAME)(node) && Schema.is(UriToken)(node.payload)

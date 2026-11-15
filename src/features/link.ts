@@ -77,10 +77,10 @@ export const feature: Feature = defineFeature({
         ],
       }),
     ],
-    extent: (node) => {
-      if (!owns(NAME)(node) || !Schema.is(LinkToken)(node.payload)) return base.extent(node)
+    extent: (node, total) => {
+      if (!owns(NAME)(node) || !Schema.is(LinkToken)(node.payload)) return base.extent(node, total)
       const lines = lineFragment(split(node.payload.target).fragment)
-      return lines === undefined ? base.extent(node) : mr.intersect(base.extent(node), lines)
+      return lines === undefined ? base.extent(node, total) : mr.intersect(base.extent(node, total), lines)
     },
     interpret: (node) =>
       owns(NAME)(node) && Schema.is(LinkToken)(node.payload)

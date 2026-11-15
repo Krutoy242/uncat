@@ -10,21 +10,22 @@ import { Feature, defineFeature } from '../program/program.ts'
 
 const NAME = 'slice'
 
-const PATTERN = String.raw`:\d+(?:-\d*)?|:-\d+|#L\d+(?:-L?\d+)?`
+const PATTERN = String.raw`:[1-9]\d*(?:-[1-9]\d*)?|:-[1-9]\d*|#L[1-9]\d*(?:-L?[1-9]\d*)?`
 
-const Bound = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 9_999_999 }))
+const From = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 9_999_999 }))
 
-class SliceMark extends Schema.Class<SliceMark>('uncat/slice/SliceMark')({ from: Bound, to: Bound }) {}
+const To = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 9_999_999 }))
+
+class SliceMark extends Schema.Class<SliceMark>('uncat/slice/SliceMark')({ from: From, to: To }) {}
 
 const read = (text: string): { readonly from: number; readonly to: number } => {
-  const [, head = '', open, tail] = /^(?::|#L)(\d*)(-)?L?(\d*)$/.exec(text) ?? []
+  const [, head = '', open, tail = ''] = /^(?::|#L)(\d*)(-)?L?(\d*)$/.exec(text) ?? []
   const from = head === '' ? 0 : Number(head)
-  if (open === undefined) return { from, to: from }
-  return { from, to: tail === '' || tail === undefined ? 0 : Number(tail) }
+  return { from, to: open === undefined ? from : Number(tail) }
 }
 
 const write = ({ from, to }: { readonly from: number; readonly to: number }): string =>
-  from === 0 ? `:-${to}` : to === from ? `:${from}` : to === 0 ? `:${from}-` : `:${from}-${to}`
+  from === 0 ? `:-${to}` : to === from ? `:${from}` : `:${from}-${to}`
 
 const syntaxCodec = Schema.String.check(Schema.isPattern(new RegExp(`^(?:${PATTERN})$`))).pipe(
   Schema.decodeTo(SliceMark, { decode: SchemaGetter.transform(read), encode: SchemaGetter.transform(write) }),
@@ -32,11 +33,10 @@ const syntaxCodec = Schema.String.check(Schema.isPattern(new RegExp(`^(?:${PATTE
 
 const decodeMark = Schema.decodeUnknownSync(syntaxCodec)
 
-const extentOf = (mark: SliceMark): mr.MIR => {
-  const first = Math.max(1, mark.from)
-  const last = mark.to === 0 ? Infinity : Math.max(1, mark.to)
-  return mr.normalize([[Math.min(first, last), Math.max(first, last)]])
-}
+const extentOf = (mark: SliceMark, total: number): mr.MIR =>
+  mark.from === 0
+    ? [[Math.max(1, total - mark.to + 1), Math.max(1, total)]]
+    : mr.normalize([[Math.min(mark.from, mark.to), Math.max(mark.from, mark.to)]])
 
 export const feature: Feature = defineFeature({
   name: NAME,
@@ -51,18 +51,19 @@ export const feature: Feature = defineFeature({
         sigils: [],
         pattern: () => PATTERN,
         codec: syntaxCodec,
-        description: 'Single line, line range, open-ended slice, or #L anchor',
+        description: 'Single line, line range, tail slice, or #L anchor',
         samples: () => [
           new SliceMark({ from: 5, to: 5 }),
           new SliceMark({ from: 1, to: 5 }),
-          new SliceMark({ from: 5, to: 0 }),
           new SliceMark({ from: 0, to: 5 }),
         ],
       }),
     ],
-    extent: (node) => {
+    extent: (node, total) => {
       const mark = node.meta.marks[NAME]
-      return mark === undefined ? base.extent(node) : mr.intersect(base.extent(node), extentOf(decodeMark(mark)))
+      return mark === undefined
+        ? base.extent(node, total)
+        : mr.intersect(base.extent(node, total), extentOf(decodeMark(mark), total))
     },
   }),
 })

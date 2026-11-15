@@ -7,6 +7,7 @@
 import { join } from 'node:path'
 import { assert, describe, expect, it } from '@effect/vitest'
 import { Arbitrary, Effect, Exit, Schema } from 'effect'
+import * as mr from 'multi-integer-range'
 import { discoveredFeatures } from 'virtual:ahead-features'
 import { recognize } from '../src/program/engine.ts'
 import { applicable, decode, encode, print, syntaxOf } from '../src/program/grammar.ts'
@@ -176,6 +177,30 @@ describe('grammar product recognition', () => {
             `${entry.feature}: ${token}`,
           )
         }
+      }),
+    )
+  }
+
+  for (const body of program.bodies) {
+    it.effect(`${body.feature} extent evaluation is valid across arbitrary line counts`, () =>
+      Effect.gen(function* () {
+        const result = yield* Arbitrary.checkEffect(
+          Arbitrary.all([
+            prose,
+            tokens(body, ['lead', 'prefix', 'suffix']),
+            Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 }))),
+          ]),
+          ([{ left, right }, { token }, total]) =>
+            Effect.map(recognize(program, `${left} ${token} ${right}`, whole), (nodes) => {
+              const [node] = nodes
+              if (node === undefined) return false
+              const ext = program.extent(node, total)
+              const min = mr.min(ext)
+              return ext.length === 0 || (min !== undefined && min >= 1)
+            }).pipe(within(cwd, flagsOn)),
+          { runs: 5, seed: 19 },
+        )
+        expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
       }),
     )
   }

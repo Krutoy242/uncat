@@ -37,7 +37,7 @@ export class Program {
   declare attest: (text: string) => Effect.Effect<ReadonlyArray<Attestation>>
   declare literal: (node: Ahead.Annotated<Meta, unknown>) => Replacement | undefined
   declare interpret: (node: Ahead.Annotated<Meta, unknown>) => Effect.Effect<ReadonlyArray<Source>, Fault>
-  declare extent: (node: Ahead.Annotated<Meta, unknown>) => mr.MIR
+  declare extent: (node: Ahead.Annotated<Meta, unknown>, total: number) => mr.MIR
   declare enveloping: ReadonlyArray<(node: Ahead.Annotated<Meta, unknown>) => 'yes' | 'no' | 'abstain'>
   declare recursion: ReadonlyArray<
     (node: Ahead.Annotated<Meta, unknown>, source: Source) => Effect.Effect<'yes' | 'no' | 'abstain'>

@@ -25,7 +25,7 @@ npm i -g uncat      # zero runtime dependencies, Node.js 26+
 - `` !`ls -la` `` — Shell command output
 - `file:///path/to/file.ts#L1-5` — Bare file URI with optional line anchor
 - `path/file.ts`, `` `path/file.ts` `` — Bare or inline-code path when -a is enabled
-- `@file.txt:5`, `@file.txt:1-5`, `@file.txt:5-`, `@file.txt:-5` — Single line, line range, open-ended slice, or #L anchor
+- `@file.txt:5`, `@file.txt:1-5`, `@file.txt:-5` — Single line, line range, tail slice, or #L anchor
 - `@@file.txt`, `` !!`ls -la` `` — Raw string interpolation without wrapper tag
 - `@=file.txt`, `@@=file.txt` — Direct inclusion without recursive expansion
 - `\@file.txt`, `` \!`ls -la` `` — Escaped literal token

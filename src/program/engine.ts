@@ -225,15 +225,14 @@ const expandNode = Effect.fnUntraced(function* (
       bytes: 0,
       detail: '',
     })
-  const extent = program.extent(node)
   const enveloped = verdict(
     program.enveloping.map((policy) => policy(node)),
     true,
   )
   const settleBranch = Effect.fnUntraced(function* (source: Source, index: number) {
-    const scoped = new Source({ ...source, extent: mr.intersect(source.extent, extent) })
+    const lines = new Lines(source.text)
+    const scoped = new Source({ ...source, extent: mr.intersect(source.extent, program.extent(node, lines.size)) })
     const branchId = `${id}#${index}`
-    const lines = new Lines(scoped.text)
     if (lines.size > 0 && lines.clip(scoped.extent).length === 0) {
       return yield* new Fault({
         code: 'empty-extent',
