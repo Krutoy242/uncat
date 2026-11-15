@@ -23,9 +23,9 @@ npm i -g uncat      # zero runtime dependencies, Node.js 26+
 - `@##comment`, `@##[spaced comment]` — Comment stripped with surrounding whitespace
 - `@:clipboard` — System clipboard content
 - `` !`ls -la` `` — Shell command output
-- `file:///path/to/file.ts#L10-20` — Bare file URI with optional line anchor
+- `file:///path/to/file.ts#L1-5` — Bare file URI with optional line anchor
 - `path/file.ts`, `` `path/file.ts` `` — Bare or inline-code path when -a is enabled
-- `@file.txt:15`, `@file.txt:10-50`, `@file.txt:15-`, `@file.txt:-15` — Single line, line range, open-ended slice, or #L anchor
+- `@file.txt:5`, `@file.txt:1-5`, `@file.txt:5-`, `@file.txt:-5` — Single line, line range, open-ended slice, or #L anchor
 - `@@file.txt`, `` !!`ls -la` `` — Raw string interpolation without wrapper tag
 - `@=file.txt`, `@@=file.txt` — Direct inclusion without recursive expansion
 - `\@file.txt`, `` \!`ls -la` `` — Escaped literal token
@@ -48,8 +48,8 @@ cd; echo @@dir/inside.txt | uncat # hello ~
 ```
 
 - **Deduplication (Two-Pass Canonical Widening)**:
-  - merging overlaps: `@file.ts:1-50 @file.ts:30-80` → single wrapped file `1-80` + attestation reference for second
-  - replacing subsumed ranges with an attestation reference: `@file.ts:-100\n@file.ts:30-80`
+  - merging overlaps: `@file.ts:1-5 @file.ts:3-8` → single wrapped file `1-8` + attestation reference for second
+  - replacing subsumed ranges with an attestation reference: `@file.ts:1-8\n@file.ts:3-5`
   - accounting for already expanded blocks in the input
 - **Shell Environment**: child subshell in parent `cwd`, timeout (`--timeout`), metadata recording (execution time, `stderr`, exit code, modified `cwd`); `--no-shell` disables execution.
 - **Quotas and Slicing** (all limits are configurable):
@@ -63,7 +63,7 @@ cd; echo @@dir/inside.txt | uncat # hello ~
 Every expanded source is wrapped in an element named after its kind, which agents parse reliably and which `uncat` reads back on later runs:
 
 ```xml
-<file path="src/a.ts" lines="10-50">
+<file path="src/a.ts" lines="1-5">
 …
 </file>
 
@@ -71,7 +71,7 @@ Every expanded source is wrapped in an element named after its kind, which agent
 …
 </shell>
 
-<file path="src/a.ts" lines="30-40" ref="above" />
+<file path="src/a.ts" lines="3-4" ref="above" />
 ```
 
 ## CLI and HUD

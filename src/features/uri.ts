@@ -95,7 +95,7 @@ export const feature: Feature = defineFeature({
         tentative: false,
         codec: syntaxCodec,
         description: 'Bare file URI with optional line anchor',
-        samples: [new UriToken({ path: '/path/to/file.ts', fragment: 'L10-20' })],
+        samples: [new UriToken({ path: '/path/to/file.ts', fragment: 'L1-5' })],
         scan,
       }),
     ],
