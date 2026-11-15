@@ -1,42 +1,81 @@
-# Regenerates the README screenshots from a real bat, uncat and bat run whenever behaviour or the demo prompt changes, committing the fresh SVGs back.
+# Renders the README terminal demo into SMIL-animated SVG via HalFrgrd/evp
+# and deploys it directly to GitHub Pages without polluting the git repository.
 name: demo
 
 on:
   push:
-    branches: [main]
-    paths: [src/**, demo/**, scripts/demo.ts]
+    branches: [master, main]
+    paths:
+      - 'src/**'
+      - 'demo/**'
+      - 'demo.tape'
+      - 'package.json'
+      - '.github/workflows/demo.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'demo-pages'
+  cancel-in-progress: true
 
 jobs:
-  render:
+  render-and-deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@v5
         with:
           fetch-depth: 10
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
         with:
-          node-version: 26
-          cache: pnpm
-      - uses: actions/setup-go@v6
-        with:
-          go-version: stable
-      - name: install bat and freeze
+          node-version: '26'
+          cache: 'pnpm'
+
+      - name: Install bat
         run: |
           sudo apt-get update && sudo apt-get install -y bat
           sudo ln -sf /usr/bin/batcat /usr/local/bin/bat
-          go install github.com/charmbracelet/freeze@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm demo
-      - name: commit refreshed screenshots
+
+      - name: Build CLI
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/*.svg
-          git diff --cached --quiet || (git commit -m "docs: refresh terminal demo" && git push)
+          pnpm install --frozen-lockfile
+          pnpm build
+          chmod +x dist/cli.mjs
+          mkdir -p dist-pages
+
+      - name: Render tape script via EVP
+        uses: HalFrgrd/evp@v0.19.0
+        env:
+          CI: ''
+          GITHUB_ACTIONS: ''
+        with:
+          script: demo.tape
+          output: dist-pages/demo.svg
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-pages
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Purge GitHub Camo Cache
+        run: |
+          CAMO_URLS=$(curl -sL "https://github.com/${{ github.repository }}" | grep -Eo 'https://camo\.githubusercontent\.com/[a-f0-9]+/[a-f0-9]+' | sort -u || true)
+          for url in $CAMO_URLS; do
+            curl -s -X PURGE "$url" > /dev/null
+          done

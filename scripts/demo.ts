@@ -1,9 +1,8 @@
 /*
- * Generates the README terminal demo from real command runs, capturing the
- * prompt as shown by bat, the live uncat session and the expanded result as
- * SVG screenshots so the documentation never drifts from actual behaviour.
+ * Generates the README terminal demo using evp and keeps the syntax block
+ * in the readme synchronized with the active grammar.
  */
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import spawn from 'nano-spawn'
 import { formatSyntaxMarkdown } from '../src/program/grammar.ts'
 import { program } from '../src/program/synthesis.ts'
@@ -24,20 +23,15 @@ if (process.argv.includes('--syntax-only')) {
   process.exit(0)
 }
 
-const shots: ReadonlyArray<readonly [string, string]> = [
-  ['docs/demo-input.svg', 'bat --color=always --style=plain --language=markdown demo/prompt.md'],
-  ['docs/demo-run.svg', 'node dist/cli.mjs demo/prompt.md --mode hud'],
-  ['docs/demo-output.svg', 'bat --color=always --style=plain --language=xml demo/prompt_.md'],
-]
-
-await mkdir('docs', { recursive: true })
 await rm('demo/prompt_.md', { force: true })
-for (const [output, command] of shots) {
-  await spawn(
-    'freeze',
-    ['--execute', command, '--output', output, '--window', '--padding', '20', '--font.size', '12'],
-    {
-      stdio: 'inherit',
-    },
-  )
+try {
+  if (process.platform === 'win32') {
+    await spawn('wsl', ['-d', 'alpine', 'evp', 'demo.tape'], { stdio: 'inherit' })
+  } else {
+    await spawn('evp', ['demo.tape'], { stdio: 'inherit' })
+  }
+} catch (error) {
+  console.warn('evp is not installed locally; demo rendering skipped (CI renders via HalFrgrd/evp action)', error)
+} finally {
+  await rm('demo/prompt_.md', { force: true })
 }

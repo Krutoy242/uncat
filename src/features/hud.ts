@@ -2,6 +2,7 @@
  * Human presenter that draws a live heads-up display sized to the terminal,
  * rendering progress and volume while work runs and markdown when finished.
  */
+import { relative } from 'node:path'
 import { styleText } from 'node:util'
 import { intro, log, outro } from '@clack/prompts'
 import { Context, Effect, Layer } from 'effect'
@@ -35,8 +36,8 @@ const volume = (bytes: number): number => Math.min(1, Math.log10(bytes + 1) / 6)
 
 const segments = (ratio: number, width: number, styled = true): string => {
   const filled = Math.round(Math.max(0, Math.min(1, ratio)) * width)
-  const full = '▰'.repeat(filled)
-  const empty = '▱'.repeat(width - filled)
+  const full = '█'.repeat(filled)
+  const empty = '░'.repeat(width - filled)
   return styled ? `${paint('green', full)}${paint('dim', empty)}` : `${full}${empty}`
 }
 
@@ -104,7 +105,7 @@ class Board {
     const elapsed = (this.finished || performance.now()) - this.started
     const bytes = rows.reduce((total, [row]) => total + row.bytes, 0)
     const spin = this.finished === 0 ? (SPINNER[this.ticks++ % SPINNER.length] ?? '') : '◆'
-    const progress = rows.length === 0 ? 1 : settled / rows.length
+    const progress = rows.length === 0 ? (this.finished === 0 ? 0 : 1) : settled / rows.length
     const width = Math.max(40, Math.min(56, columns - 6))
     const segWidth = 10
     const ruleLen = Math.max(4, width - 8 - segWidth)
@@ -179,11 +180,12 @@ const makeHudPort = () => {
         }, 80)
         timer.unref()
       }
-      draw(true)
     }
     board.apply(signal)
     if (signal.kind === 'end') {
       stopTimer()
+      draw(true)
+    } else if (signal.kind === 'begin' || signal.kind === 'open') {
       draw(true)
     } else {
       draw(false)
@@ -228,7 +230,7 @@ const summary = (outcome: Outcome): string => {
   const headline = `**${report.sources}** sources · **${size(report.bytes)}** · **${report.lines}** lines · **${(report.elapsedMs / 1000).toFixed(2)} s**`
   const outputs = report.outputs.map(
     (output) =>
-      `| \`${output.path}\` | ${segments(output.chars / Math.max(1, report.chars), 8, false)} ${size(output.bytes)} | ${output.lines} |`,
+      `| \`${(relative(process.cwd(), output.path) || output.path).replaceAll('\\', '/')}\` | ${segments(output.chars / Math.max(1, report.chars), 8, false)} ${size(output.bytes)} | ${output.lines} |`,
   )
   const table = outputs.length === 0 ? [] : ['', '| output | volume | lines |', '| --- | --- | --- |', ...outputs]
   const chunks =
@@ -259,10 +261,10 @@ export const feature: Feature = defineFeature({
           Effect.gen(function* () {
             const hud = yield* HudPort
             const markdown = yield* MarkdownPort
+            const rendered = yield* markdown.render(summary(outcome))
             const tree = hud.settle()
             if (outcome.toStdout) process.stdout.write(outcome.text.endsWith('\n') ? outcome.text : `${outcome.text}\n`)
             const output = outcome.toStdout ? process.stderr : process.stdout
-            const rendered = yield* markdown.render(summary(outcome))
             intro(paint(['bgCyan', 'black', 'bold'], ' uncat '), { output })
             log.message(tree.join('\n'), { output, symbol: paint('cyan', '◇') })
             log.message(rendered.trimEnd(), { output })

@@ -2,11 +2,13 @@
 
 CLI and library for contextual text expansion for AI agents.
 
-<p align="center">
-  <img src="docs/demo-input.svg" alt="bat shows a prompt that references files, a folder, a command and a comment" width="32%">
-  <img src="docs/demo-run.svg" alt="uncat expands it with a live heads-up display" width="32%">
-  <img src="docs/demo-output.svg" alt="bat shows the expanded prompt" width="32%">
-</p>
+<div align="center">
+  <a href="https://krutoy242.github.io/uncat/demo.svg" target="_blank" title="Open interactive SVG (text selection and copying enabled)">
+    <img src="https://krutoy242.github.io/uncat/demo.svg" width="100%" alt="CLI Demo" />
+  </a>
+  <br />
+  <sub>💡 Click the demo to open an interactive SVG with direct terminal text copying.</sub>
+</div>
 
 ```bash
 npm i -g uncat      # zero runtime dependencies, Node.js 26+
@@ -74,7 +76,7 @@ Every expanded source is wrapped in an element named after its kind, which agent
 <file path="src/a.ts" lines="3-4" ref="above" />
 ```
 
-## CLI and HUD
+## CLI
 
 ```bash
 uncat file.txt                # → file_.txt
@@ -90,12 +92,6 @@ echo @file.txt | uncat        # → stdout
 - Output modes (`--mode`): HUD (for users), raw (`stdin`/`stdout` pipe), JSON (for AI agents) — chosen automatically from the terminal and agent environment
 - Non-piped output provides meta information like total size, total line/char count, from-to line/char positions of every located block
 - Actionable errors with fuzzy path suggestions
-
-**HUD**
-
-- Sci-fi minimalism, Unicode, terminal size adaptation
-- Graphics instead of flickering digits, all parameters represented in distinct visual ways
-- In real time: expansion tree, part completion percentage, elapsed/final time, errors, volume, and slicing
 
 ## API
 

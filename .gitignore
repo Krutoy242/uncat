@@ -1,6 +1,9 @@
 node_modules/
 dist/
+dist-pages/
 coverage/
 *.log
+demo.svg
 demo/*_.md
 demo/*_[0-9][0-9].md
+.playwright-mcp/
